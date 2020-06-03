@@ -1,0 +1,5 @@
+die gracefully
+decode each packet type and log all of it's data
+detect zeno networking protocol and drop conenction if protocol is violated 
+metrics of network timing, missing expected packets, malformed packets, dropped connections
+interactive py shell - it does this now with pdb, but it is far from optimal 
