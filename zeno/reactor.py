@@ -1,30 +1,32 @@
 
 """
 
-Basic Zeno node for p2p usage.
+Basic Zeno reactor for managing connections and sending and receiving messages.
 
-Implements server to receive connections and also a method to send connections.
+Implements networking node to send and receive messages.
 
 Works concurrently, will create one lightweight thread for each outgoing connection
 and one thread for each incoming connection.
 
-Use case: Accept incoming connections
+Use case: Get peers
 
-ZenoNode will only start the server if you tell it to.
+ZenoReactor will only start the server if you tell it to.
 
-> node = ZenoNode()
-> node.start_all()
+> node = ZenoReactor()
+> node.start_server()
+> node.send("127.0.0.1:7766", peer_controller_pid + "\0")
+> print(node.get_event())
 
 
 Use case: flood a node
 
-ZenoNode itself is well behaved, it will only create one outgoing connection for each peer.
+ZenoReactor itself is well behaved, it will only create one outgoing connection for each peer.
 But, you could create a bunch of them:
 
 > nodes = []
 > for i in range(100):
->     node = ZenoNode()
->     node.send("127.0.0.1:40445", some_pid, "blagarbage")
+>     node = ZenoReactor()
+>     node.send("127.0.0.1:40445", "blamessage")
 >     nodes.append(node)
 
 
@@ -43,33 +45,26 @@ import queue
 import binascii
 
 
-PEER_CONTROLLER_PID = binascii.unhexlify(b"e4dfbbb9aeaff2c844181d5f031f2cac")
-GET_PEERS = "\0"
-
 NEW_PEER = "new_peer"
 DROP_PEER = "drop_peer"
 MESSAGE = "msg"
 
 
-class ZenoNode:
-    def __init__(self, seeds,
+class ZenoReactor:
+    def __init__(self,
             listen_addr="0.0.0.0",
-            listen_port=40440,
+            listen_port=7777,
             keepalive_interval=5):
-        self.seeds = seeds
         self.listen_addr = listen_addr
         self.listen_port = listen_port
         self.forwarders = {}
         self.keepalive_interval=5
         self.incoming_queue = queue.Queue()
 
-    def send(self, dest, pid, msg):
-        return self._send(dest, pid + msg)
-
     def get_event(self, block=True, timeout=None):
         self.incoming_queue.get(block=block, timeout=timeout)
 
-    def _send(self, dest, data):
+    def send(self, dest, data):
         # You won't run into a race condition here because Gevent is single threaded
         # It switches between lightweight threads only when they call an I/O operation
         # Otherwise you would need locks everywhere
@@ -80,13 +75,6 @@ class ZenoNode:
             gevent.spawn(self.wrap_run_fowarder, dest, forwarder)
             self.fowarders[dest] = forwarder
         self.forwarder.put(data)
-
-    def run_refresh_peers(self):
-        while True:
-            for seed in self.seeds:
-                self.send(seed, peer_controller_pid, GET_PEERS)
-
-            time.sleep(60)
 
     def wrap_run_forwarder(self, dest, queue):
         try:
@@ -113,14 +101,7 @@ class ZenoNode:
                 sends.sendall(b"\0\0\0\0")
 
     def start(self):
-        self.start_server()
-        self.start_refresh_peers()
-
-    def start_server(self):
         gevent.spawn(self.run_server)
-
-    def start_refresh_peers(self):
-        gevent.spawn(self.run_refesh_peers)
 
     def run_server(self):
         pool = Pool(1000)
