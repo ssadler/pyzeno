@@ -43,17 +43,18 @@ import queue
 import binascii
 
 
-
 PEER_CONTROLLER_PID = binascii.unhexlify(b"e4dfbbb9aeaff2c844181d5f031f2cac")
 GET_PEERS = "\0"
 
 
 class ZenoNode:
     def __init__(self, seeds,
-            listen=("0.0.0.0", 40440),
+            listen_addr="0.0.0.0",
+            listen_port=40440,
             keepalive_interval=5):
         self.seeds = seeds
-        self.listen = listen
+        self.listen_addr = listen_addr
+        self.listen_port = listen_port
         self.forwarders = {}
         self.keepalive_interval=5
 
@@ -115,7 +116,8 @@ class ZenoNode:
 
     def run_server(self):
         pool = Pool(1000)
-        server = StreamServer(self.listen, self.wrap_handle_conn, spawn=pool)
+        listen = (self.listen_addr, self.listen_port)
+        server = StreamServer(listen, self.wrap_handle_conn, spawn=pool)
         server.serve_forever()
 
     def wrap_handle_conn(self, sock, addr):
