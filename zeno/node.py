@@ -46,6 +46,10 @@ import binascii
 PEER_CONTROLLER_PID = binascii.unhexlify(b"e4dfbbb9aeaff2c844181d5f031f2cac")
 GET_PEERS = "\0"
 
+NEW_PEER = "new_peer"
+DROP_PEER = "drop_peer"
+MESSAGE = "msg"
+
 
 class ZenoNode:
     def __init__(self, seeds,
@@ -57,9 +61,13 @@ class ZenoNode:
         self.listen_port = listen_port
         self.forwarders = {}
         self.keepalive_interval=5
+        self.incoming_queue = queue.Queue()
 
     def send(self, dest, pid, msg):
         return self._send(dest, pid + msg)
+
+    def get_event(self, block=True, timeout=None):
+        self.incoming_queue.get(block=block, timeout=timeout)
 
     def _send(self, dest, data):
         # You won't run into a race condition here because Gevent is single threaded
@@ -125,25 +133,19 @@ class ZenoNode:
             self.handle_conn(sock, addr)
         except:
             print("Exception handling connection: %" % addr)
-            self.notify_drop_peer(addr)
+            self.incoming_queue.put((DROP_PEER, addr))
             sock.close()
             raise
 
     def handle_conn(self, sock, addr):
         (protocol, port) = recv_struct(sock, "BH")
         assert protocol == b"\0"
-        self.node.notify_new_peer(self.addr, port)
+        self.incoming_queue.put((NEW_PEER, addr))
         
         while True:
             msg_len = recv_struct(sock, "I")
             msg = recv_bytes(sock, msg_len)
-            self.node.on_message(msg)
-
-    def notify_new_peer(self, peer):
-        print("New peer: %s" % peer)
-
-    def notify_drop_peer(self, peer):
-        print("Drop peer: %s" % peer)
+            self.incoming_queue.put((MESSAGE, addr, msg))
 
 
 # Receive data using struct format
