@@ -13,7 +13,7 @@ Use case: Get peers
 ZenoReactor will only start the server if you tell it to.
 
 > node = ZenoReactor()
-> node.start_server()
+> node.start()
 > node.send("127.0.0.1:7766", peer_controller_pid + "\0")
 > print(node.get_event())
 
@@ -39,10 +39,11 @@ gevent.monkey.patch_all()   # This will replace all blocking I/O interfaces with
 
 import gevent
 import gevent.server
+import gevent.pool
+from gevent import queue
+import logging
 import socket
 import struct
-import queue
-import binascii
 
 
 NEW_PEER = "new_peer"
@@ -62,83 +63,91 @@ class ZenoReactor:
         self.incoming_queue = queue.Queue()
 
     def get_event(self, block=True, timeout=None):
-        self.incoming_queue.get(block=block, timeout=timeout)
+        return self.incoming_queue.get(block=block, timeout=timeout)
 
-    def send(self, dest, data):
+    def send(self, nodeid, data):
         # You won't run into a race condition here because Gevent is single threaded
         # It switches between lightweight threads only when they call an I/O operation
         # Otherwise you would need locks everywhere
         # It's beautiful
-        forwarder = self.forwarders.get(dest)
+        forwarder = self.forwarders.get(nodeid)
         if not forwarder:
+            peer_ip, peer_port = nodeid.split(':')
+            dest = (peer_ip, int(peer_port))
             forwarder = queue.Queue()
-            gevent.spawn(self.wrap_run_fowarder, dest, forwarder)
-            self.fowarders[dest] = forwarder
-        self.forwarder.put(data)
+            self.forwarders[nodeid] = forwarder
+            gevent.spawn(self.wrap_run_forwarder, dest, forwarder)
+        forwarder.put(data)
 
-    def wrap_run_forwarder(self, dest, queue):
+    def wrap_run_forwarder(self, dest, fwdq):
         try:
-            self.run_forwarder(dest, queue)
-        except:
-            print("Fowarder for %s died" % dest)
-            del self.forwarders[dest]
-            raise
+            self.run_forwarder(dest, fwdq)
+        except Exception as e:
+            logging.warn("Fowarder %s died: %s" % (dest, e))
+            #raise
+        finally:
+            del self.forwarders["%s:%s" % dest]
 
-    def run_forwarder(self, dest, queue):
-        sends = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        peer = dest.split(':')
-        peer[1] = int(peer[1])
-        sends.connect(peer)
+    def run_forwarder(self, dest, fwdq):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(dest)
+
+        # Send header
+        sock.send(b'\0' + struct.pack('>H', self.listen_port))
 
         while True:
             try:
-                msg = queue.get(timeout=self.keepalive_interval)
+                msg = fwdq.get(timeout=self.keepalive_interval)
                 if msg == ("quit",):
                     break
-                packet = struct.pack("I", len(msg)) + msg
-                sends.sendall(packet)
+                packet = struct.pack(">I", len(msg)) + msg
+                sock.sendall(packet)
             except queue.Empty:
-                sends.sendall(b"\0\0\0\0")
+                sock.sendall(b"\0\0\0\0")
 
     def start(self):
         gevent.spawn(self.run_server)
 
     def run_server(self):
-        pool = Pool(1000)
+        pool = gevent.pool.Pool(1000)
         listen = (self.listen_addr, self.listen_port)
-        server = StreamServer(listen, self.wrap_handle_conn, spawn=pool)
+        server = gevent.server.StreamServer(listen, self.wrap_handle_conn, spawn=pool)
         server.serve_forever()
 
     def wrap_handle_conn(self, sock, addr):
         try:
             self.handle_conn(sock, addr)
-        except:
-            print("Exception handling connection: %" % addr)
-            self.incoming_queue.put((DROP_PEER, addr))
-            sock.close()
+        except Exception as e:
+            logging.warn("Conn %s: %s" % (addr, e))
+            self.incoming_queue.put((DROP_PEER, show_node_id(addr)))
             raise
+        finally:
+
+            sock.close()
 
     def handle_conn(self, sock, addr):
-        (protocol, port) = recv_struct(sock, "BH")
-        assert protocol == b"\0"
-        self.incoming_queue.put((NEW_PEER, addr))
+        (protocol, port) = recv_struct(sock, ">BH")
+        assert protocol == 0, ("Strange protocol: %s" % protocol)
+        self.incoming_queue.put((NEW_PEER, show_node_id(addr)))
         
         while True:
-            msg_len = recv_struct(sock, "I")
+            (msg_len,) = recv_struct(sock, ">I")
             msg = recv_bytes(sock, msg_len)
-            self.incoming_queue.put((MESSAGE, addr, msg))
+            self.incoming_queue.put((MESSAGE, show_node_id(addr), msg))
 
+def show_node_id(addr):
+    return "%s:%s" % addr
 
 # Receive data using struct format
 # https://docs.python.org/3/library/struct.html#format-characters
 def recv_struct(sock, fmt):
     size = struct.calcsize(fmt)
-    return struct.unpack(fmt, recv_bytes(size))
+    return struct.unpack(fmt, recv_bytes(sock, size))
 
 def recv_bytes(sock, n):
     b = b""
     while True:
-        length = length(b)
+        length = len(b)
         if length == n:
             break
         b += sock.recv(n-length)
