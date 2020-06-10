@@ -49,6 +49,7 @@ import struct
 NEW_PEER = "new_peer"
 DROP_PEER = "drop_peer"
 MESSAGE = "msg"
+KEEPALIVE = "keepalive"
 
 
 class ZenoReactor:
@@ -119,21 +120,24 @@ class ZenoReactor:
             self.handle_conn(sock, addr)
         except Exception as e:
             logging.warn("Conn %s: %s" % (addr, e))
-            self.incoming_queue.put((DROP_PEER, show_node_id(addr)))
+            self.incoming_queue.put({"type": DROP_PEER, "node_id": show_node_id(addr)})
             raise
         finally:
-
             sock.close()
 
     def handle_conn(self, sock, addr):
         (protocol, port) = recv_struct(sock, ">BH")
         assert protocol == 0, ("Strange protocol: %s" % protocol)
-        self.incoming_queue.put((NEW_PEER, show_node_id(addr)))
+        self.incoming_queue.put({"type": NEW_PEER, "node_id": show_node_id(addr)})
         
         while True:
             (msg_len,) = recv_struct(sock, ">I")
-            msg = recv_bytes(sock, msg_len)
-            self.incoming_queue.put((MESSAGE, show_node_id(addr), msg))
+            if msg_len == 0:
+                self.incoming_queue.put({"type": KEEPALIVE, "node_id": show_node_id(addr)})
+            else:
+                msg = recv_bytes(sock, msg_len)
+                self.incoming_queue.put({"type": MESSAGE, "node_id": show_node_id(addr), "data": msg})
+
 
 def show_node_id(addr):
     return "%s:%s" % addr
