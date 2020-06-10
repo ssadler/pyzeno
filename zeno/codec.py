@@ -40,19 +40,20 @@ class UnionCodec:
 
     def encode(self, data):
         (i, encoded) = self.unchoose(data)
-        out = bytes([i]) + encoded
+        return bytes([i]) + encoded
 
     def unchoose(self, data):
         for (i, (name, codec)) in enumerate(self.ITEMS):
             if name in data:
-                return (i, codec.decode(data[name]))
-        raise ValueError("no keys found in provided record")
+                return (i, codec.encode(data[name]))
+        raise ValueError("no keys found in provided record") # Could be a beter error message
 
 class UnitCodec:
     def decode(self, _parser):
         return ()
 
-    def encode(self):
+    def encode(self, a):
+        assert a in (None, ()), ("Cannot encode to (): %s" % repr(a))
         return b""
 
 class ListCodec:

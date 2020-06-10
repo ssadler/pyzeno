@@ -33,6 +33,9 @@ class ZenoMonitorNode(ZenoReactor):
             else:
                 evt['round_event'] = self.decode_round_event(data[16:], evt)
         return evt
+    
+    def send_pid(self, node_id, pid, msg):
+        self.send(node_id, to_bin(pid) + msg)
 
     def decode_peer_event(self, data, evt):
         parser = Parser(data)
