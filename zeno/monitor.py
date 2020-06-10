@@ -1,5 +1,6 @@
 
 from zeno.reactor import *
+from zeno.round import *
 from zeno.utils import *
 from zeno.codec import *
 
@@ -15,7 +16,7 @@ PEER_CONTROLLER_PID = to_bin("e4dfbbb9aeaff2c844181d5f031f2cac")
 
 
 class ZenoMonitorNode(ZenoReactor):
-    def get_event(self, *args, **kwargs):
+    def get_event(self, *args, keep_data=False, **kwargs):
         evt = super(ZenoMonitorNode, self).get_event(*args, **kwargs)
         if evt['type'] != MESSAGE:
             return evt
@@ -24,6 +25,8 @@ class ZenoMonitorNode(ZenoReactor):
         if len(pid) < 16:
             evt['invalid'] = True
         else:
+            if not keep_data:
+                del evt['data']
             evt['pid'] = pid
             if pid == PEER_CONTROLLER_PID:
                 evt['peer_event'] = self.decode_peer_event(data[16:], evt)
@@ -41,7 +44,7 @@ class ZenoMonitorNode(ZenoReactor):
 
 
 class NodeIdCodec(RecordCodec):
-    MEMBERS = [
+    ITEMS = [
         ("addr", StrCodec()),
         ("port", StructSingleCodec(">H"))
     ]
@@ -50,54 +53,7 @@ class NodeIdCodec(RecordCodec):
 
 
 class PeerControllerCodec(UnionCodec):
-    MEMBERS = [
+    ITEMS = [
         ("getpeers", UnitCodec()),
         ("peers", SetCodec(NodeIdCodec()))
     ]
-
-class StepMessageCodec(UnionCodec):
-    def decode(self, parser):
-        major, minor = parser.unpack(">BB")
-        out = self.choose(major, parser)
-        out['minor'] = minor
-        return out
-
-class KmdToEthStepCodec(StepMessageCodec):
-    MEMBERS = [
-        ("0", UnitCodec()),
-        ("1", UnitCodec()),
-        ("2", UnitCodec()),
-        ("3", UnitCodec()),
-        ("4", UnitCodec()),
-        ("5", UnitCodec()),
-        ("6", UnitCodec()),
-    ]
-
-class EthToKmdStepCodec(StepMessageCodec):
-    MEMBERS = [
-        ("0", UnitCodec()),
-        ("1", UnitCodec()),
-        ("2", UnitCodec()),
-        ("3", UnitCodec()),
-        ("4", UnitCodec()),
-        ("5", UnitCodec()),
-    ]
-
-class StatsToKmdStepCodec(StepMessageCodec):
-    MEMBERS = []
-
-
-class RoundMessageCodec(UnionCodec):
-    MEMBERS = [
-        ("kmdToEth", KmdToEthStepCodec()),
-        ("ethToKmd", EthToKmdStepCodec()),
-        ("statsToKmd", StatsToKmdStepCodec()),
-    ]
-
-class SignedRoundMessageCodec(RecordCodec):
-    MEMBERS = [
-        ('signature', FixedBufCodec(65)),
-        ('inner', MaybeCodec(RoundMessageCodec()))
-    ]
-
-
