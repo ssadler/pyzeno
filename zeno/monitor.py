@@ -13,8 +13,6 @@ process.
 
 PEER_CONTROLLER_PID = to_bin("e4dfbbb9aeaff2c844181d5f031f2cac")
 
-INVALID = "invalid"
-
 
 class ZenoMonitorNode(ZenoReactor):
     def get_event(self, *args, **kwargs):
@@ -24,11 +22,13 @@ class ZenoMonitorNode(ZenoReactor):
         data = evt['data']
         pid = data[:16]
         if len(pid) < 16:
-            return (INVALID, evt)
-        if pid == PEER_CONTROLLER_PID:
-            evt['peer_event'] = self.decode_peer_event(data[16:], evt)
+            evt['invalid'] = True
         else:
-            evt['round_event'] = self.decode_round_event(data[16:], evt)
+            evt['pid'] = pid
+            if pid == PEER_CONTROLLER_PID:
+                evt['peer_event'] = self.decode_peer_event(data[16:], evt)
+            else:
+                evt['round_event'] = self.decode_round_event(data[16:], evt)
         return evt
 
     def decode_peer_event(self, data, evt):
