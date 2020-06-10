@@ -1,4 +1,5 @@
 
+from math import log, ceil
 import struct
 
 from zeno.utils import *
@@ -138,12 +139,8 @@ class FixedBufCodec:
 class BigIntCodec:
     def decode(self, parser):
         (n,) = parser.unpack(">B")
-        if n == 0:
-            return 0
-        bs = parser.take(n)
-        return int(from_bin(bs), 16)
+        return int.from_bytes(parser.take(n), 'big')
 
     def encode(self, i):
-        s = to_bin(hex(i)[2:])
-        return bytes([len(s)]) + s
+        return int(i).to_bytes(ceil(log(i, 256)), 'big')
 
