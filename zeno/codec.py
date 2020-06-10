@@ -19,7 +19,6 @@ class Parser:
         self.data = self.data[size:]
         return out
 
-
 class UnionCodec:
     def __init__(self, items=None):
         if items:
@@ -32,15 +31,28 @@ class UnionCodec:
 
     def choose(self, type_id, parser):
         if type_id > len(self.ITEMS) - 1:
-            import pdb; pdb.set_trace()
-            raise ValueError("%s: invalid union type id: %s" % (self.__class__.__name__, type_id))
+            raise ValueError("%s: invalid union type id: %s" %
+                             (self.__class__.__name__, type_id))
 
-        member = self.ITEMS[type_id]
-        return {member[0]: member[1].decode(parser)}
+        (name, codec) = self.ITEMS[type_id]
+        return {name: codec.decode(parser)}
+
+    def encode(self, data):
+        (i, encoded) = self.unchoose(data)
+        out = bytes([i]) + encoded
+
+    def unchoose(self, data):
+        for (i, (name, codec)) in enumerate(self.ITEMS):
+            if name in data:
+                return (i, codec.decode(data[name]))
+        raise ValueError("no keys found in provided record")
 
 class UnitCodec:
     def decode(self, _parser):
         return ()
+
+    def encode(self):
+        return b""
 
 class ListCodec:
     def __init__(self, inner):
@@ -53,6 +65,10 @@ class ListCodec:
             out.append(self.inner.decode(parser))
         return out
 
+    def encode(self, items):
+        out = struct.pack('!Q', len(items))
+        return out + b"".join(inner.encode(i) for i in items)
+
 class SetCodec(ListCodec):
     def decode(self, parser):
         return set(super(SetCodec, self).decode(parser))
@@ -62,9 +78,16 @@ class BufCodec:
         (length,) = parser.unpack("!Q")
         return parser.take(length)
 
+    def encode(self, buf):
+        out = struct.pack('!Q', len(items))
+        return out + buf
+
 class StrCodec(BufCodec):
     def decode(self, parser):
         return super(StrCodec, self).decode(parser).decode()
+
+    def encode(self, s):
+        return super(StrCodec, self).encode(s.encode())
 
 class RecordCodec:
     def __init__(self, items=None):
@@ -77,12 +100,18 @@ class RecordCodec:
             out[name] = codec.decode(parser)
         return out
 
+    def encode(self, record):
+        out = "".join(codec.encode(record[k]) for (k, codec) in self.ITEMS)
+
 class StructSingleCodec:
     def __init__(self, fmt):
         self.fmt = fmt
 
     def decode(self, parser):
         return parser.unpack(self.fmt)[0]
+
+    def encode(self, i):
+        return struct.pack(self.fmt, i)
 
 class MaybeCodec:
     def __init__(self, inner):
@@ -93,12 +122,18 @@ class MaybeCodec:
         if go == 1:
             return self.inner.decode(parser)
 
+    def encode(self, m):
+        return b"\1" + self.inner(m) if m else b"\0"
+
 class FixedBufCodec:
     def __init__(self, size):
         self.size = size
 
     def decode(self, parser):
         return parser.take(self.size)
+
+    def encode(self, buf):
+        return buf
 
 class BigIntCodec:
     def decode(self, parser):
@@ -107,4 +142,8 @@ class BigIntCodec:
             return 0
         bs = parser.take(n)
         return int(from_bin(bs), 16)
+
+    def encode(self, i):
+        s = to_bin(hex(i)[2:])
+        return bytes([len(s)]) + s
 

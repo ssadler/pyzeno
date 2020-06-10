@@ -8,6 +8,10 @@ class RoundCodec(UnionCodec):
         out['minor'] = minor
         return out
 
+    def encode(self, item):
+        (i, encoded) = self.unchoose(item)
+        return struct.pack(">BB", i+1, item['minor']) + codec.encode(item)
+
 class StepMessageCodec(RecordCodec):
     def __init__(self, name, inner):
         inv_items = [
@@ -20,18 +24,7 @@ class StepMessageCodec(RecordCodec):
             ("request", BigIntCodec()),
             ("inventory", ListCodec(RecordCodec(inv_items))),
         ]
-
-    def decode(self, parser):
-        data = parser.data
-        try:
-            return super(StepMessageCodec, self).decode(parser)
-        except Exception as e:
-            raise
-            # s = super(StepMessageCodec, self)
-            # parser = Parser(data)
-            # import pdb; pdb.set_trace()
-            # s.decode(parser)
-
+    
 class KmdToEthStepCodec(RoundCodec):
 
     class EthTxCodec(RecordCodec):
@@ -61,13 +54,11 @@ class OutpointCodec(RecordCodec):
             ("n", StructSingleCodec(fmt))
         ]
 
-
 class MemberUtxo(RecordCodec):
     ITEMS = [
         ("pubkey", FixedBufCodec(33)),
         ("prevout", OutpointCodec()),
     ]
-
 
 class ChosenUtxo(RecordCodec):
     ITEMS = [
@@ -83,6 +74,11 @@ class EthToKmdStepCodec(RoundCodec):
                 (length,) = parser.unpack(">B")
                 assert length < 250, "TODO: implement varint"
                 return parser.take(length)
+
+            def encode(self, script):
+                length = len(script)
+                assert length < 250, "TODO: implement varint"
+                return struct.pack(">B", length) + script
 
         ITEMS = [
             ("prevout", OutpointCodec("<I")),
@@ -115,5 +111,4 @@ class SignedRoundMessageCodec(RecordCodec):
         ('signature', FixedBufCodec(65)),
         ('inner', MaybeCodec(RoundMessageCodec()))
     ]
-
 
